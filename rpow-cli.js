@@ -1116,13 +1116,20 @@ async function main() {
   }
 
   if (command === "mine" || command === "run") {
-    const target = Number(args.count || args.tokens || 1);
+    const targetArg = args.count || args.tokens || 1;
+    const target = ["forever", "infinite", "inf", "unlimited"].includes(String(targetArg).toLowerCase())
+      ? Infinity
+      : Number(targetArg);
     const workers = Number(args.workers || defaultWorkerCount());
     const engine = args.engine || (fs.existsSync(NATIVE_MINER) ? "native" : "node");
     const logEveryMs = Number(args["log-every-ms"] || (["native", "gpu"].includes(engine) ? 1000 : 5000));
+    if (!(target === Infinity || (Number.isInteger(target) && target > 0))) {
+      throw new Error("--count/--tokens must be a positive integer or forever");
+    }
     if (!Number.isInteger(workers) || workers < 1) throw new Error("--workers must be a positive integer");
     if (!["native", "node", "gpu"].includes(engine)) throw new Error("--engine must be native, gpu or node");
     let minted = 0;
+    const targetLabel = target === Infinity ? "forever" : target;
     while (true) {
       try {
         await client.api("GET", "/me");
@@ -1204,8 +1211,9 @@ async function main() {
         client.state.challenge = null;
         client.state.mining = null;
         client.save();
+        const remaining = target === Infinity ? "forever" : Math.max(0, target - minted);
         log("success", "mint/claim accepted", result);
-        log("success", "mint progress", { minted, target, remaining: Math.max(0, target - minted) });
+        log("success", "mint progress", { minted, target: targetLabel, remaining });
       } catch (err) {
         if (err.code === "UNAUTHORIZED") {
           log("warn", "session invalid; rerun login/complete-login, then rerun mine to resume");
@@ -1217,7 +1225,11 @@ async function main() {
         client.save();
       }
     }
-    log("success", "pipeline complete", { minted, target, remaining: Math.max(0, target - minted) });
+    log("success", "pipeline complete", {
+      minted,
+      target: targetLabel,
+      remaining: target === Infinity ? "forever" : Math.max(0, target - minted),
+    });
     return;
   }
 
@@ -1227,6 +1239,7 @@ async function main() {
   node rpow-cli.js complete-login --link "https://..."
   node rpow-cli.js me
   node rpow-cli.js mine --count 1
+  node rpow-cli.js mine --count forever --engine native
   node rpow-cli.js run --count 3
   node rpow-cli.js send --to user@example.com --amount 1
   node rpow-cli.js ledger
