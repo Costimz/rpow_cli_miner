@@ -31,7 +31,9 @@ That single command will:
    to use the most powerful one, all of them, or a specific subset.
 5. Prompt for your account email, send a magic link, and prompt for the
    pasted-back link.
-6. Start continuous GPU mining.
+6. Ask how long you want to mine — forever, a token count, or a
+   wall-clock duration like `7d`.
+7. Start mining.
 
 Session state lives in `%USERPROFILE%\.rpow-cli\state.json`, so re-running
 the one-liner picks up where you left off.
@@ -39,8 +41,9 @@ the one-liner picks up where you left off.
 ### Pre-supplied answers (no prompts)
 
 ```powershell
-$env:RPOW_EMAIL = "you@example.com"
-$env:RPOW_GPUS  = "all"   # or "auto" or "0:0,1:0"
+$env:RPOW_EMAIL    = "you@example.com"
+$env:RPOW_GPUS     = "all"      # auto | all | 0:0,1:0
+$env:RPOW_DURATION = "7d"       # or set RPOW_COUNT="forever" / "1000000"
 irm https://raw.githubusercontent.com/fashaking/rpow_cli_miner/main/install.ps1 | iex
 ```
 

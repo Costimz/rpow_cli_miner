@@ -1374,6 +1374,13 @@ async function main() {
     }
     if (!Number.isInteger(workers) || workers < 1) throw new Error("--workers must be a positive integer");
     if (!["native", "node", "gpu"].includes(engine)) throw new Error("--engine must be native, gpu or node");
+    if (args["gpu-devices"] && args["gpu-devices"] !== true && !["auto", "all"].includes(String(args["gpu-devices"]))) {
+      for (const part of String(args["gpu-devices"]).split(",")) {
+        if (!/^\s*\d+\s*:\s*\d+\s*$/.test(part)) {
+          throw new Error(`invalid --gpu-devices entry: ${part} (expected platform:device, comma-separated, e.g. 0:0,1:0)`);
+        }
+      }
+    }
     let minted = 0;
     const targetLabel = target === Infinity ? (deadlineAt ? `until ${new Date(deadlineAt).toISOString()}` : "forever") : target;
     if (deadlineAt) log("info", "mine deadline set", { duration_ms: durationMs, deadline: new Date(deadlineAt).toISOString() });
