@@ -295,3 +295,7 @@ and the GPU has more cooling headroom. Increase `--gpu-local-size` to
 
 See `rpow-cli.README.md`, `INSTALL-OTHER-PC.md`, and
 `INSTALL-GPU-OTHER-PC.md` for additional notes.
+
+---
+
+Built with ❤️ by fashaking

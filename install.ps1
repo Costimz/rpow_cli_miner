@@ -352,6 +352,7 @@ function Start-Mining($stateFile, $gpuSpec, $length) {
 Write-Host ""
 Write-Host "rpow GPU miner installer" -ForegroundColor Cyan
 Write-Host "------------------------" -ForegroundColor Cyan
+Write-Host "Built with " -NoNewline; Write-Host "love" -ForegroundColor Red -NoNewline; Write-Host " by fashaking"
 
 Refresh-Path
 Ensure-Git
