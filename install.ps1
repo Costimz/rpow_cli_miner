@@ -8,7 +8,8 @@
     1. Install prerequisites with winget if missing (Git, Node.js LTS, MinGW gcc).
     2. Clone (or update) the rpow_cli_miner repo into $env:USERPROFILE\rpow-cli.
     3. Build the GPU miner binary.
-    4. Walk you through magic-link login.
+    4. Walk you through magic-link login (with browser fallback if the
+       server requires human verification).
     5. Start mining in continuous mode against your GPU.
 
   All state (session cookies, saved challenge) lives in $env:USERPROFILE\.rpow-cli\state.json.
@@ -200,15 +201,30 @@ function Do-Login($stateFile) {
   }
   if (-not $Email) { throw "Email is required to log in." }
 
-  Write-Step "Requesting magic link for $Email"
   Push-Location $InstallDir
   try {
+    Write-Step "Requesting magic link for $Email"
     & node "rpow-cli.js" login --email $Email --state $stateFile
-    if ($LASTEXITCODE -ne 0) { throw "login request failed" }
+    $loginExit = $LASTEXITCODE
 
-    Write-Host ""
-    Write-Host "Check your inbox for an email from rpow2.com." -ForegroundColor Yellow
-    Write-Host "Copy the magic link from the email and paste it below." -ForegroundColor Yellow
+    if ($loginExit -ne 0) {
+      Write-Host ""
+      Write-Warn2 "The CLI could not request a magic link directly."
+      Write-Warn2 "The server most likely requires browser-based human verification (Turnstile)."
+      Write-Host ""
+      Write-Host "Fallback: request the magic link from your browser instead." -ForegroundColor Yellow
+      Write-Host "  1. Open https://rpow2.com in your browser." -ForegroundColor Yellow
+      Write-Host "  2. Sign in with $Email and complete the human verification." -ForegroundColor Yellow
+      Write-Host "  3. Open the magic-link email from rpow2.com." -ForegroundColor Yellow
+      Write-Host "  4. Copy the link WITHOUT clicking it (clicking may consume the token in the browser)." -ForegroundColor Yellow
+      Write-Host "  5. Paste it below." -ForegroundColor Yellow
+      Write-Host ""
+    } else {
+      Write-Host ""
+      Write-Host "Check your inbox for an email from rpow2.com." -ForegroundColor Yellow
+      Write-Host "Copy the magic link from the email and paste it below." -ForegroundColor Yellow
+    }
+
     $link = Read-Host "Paste magic link"
     if (-not $link) { throw "No magic link provided." }
 
@@ -336,6 +352,7 @@ function Start-Mining($stateFile, $gpuSpec, $length) {
 Write-Host ""
 Write-Host "rpow GPU miner installer" -ForegroundColor Cyan
 Write-Host "------------------------" -ForegroundColor Cyan
+Write-Host "Built with " -NoNewline; Write-Host "love" -ForegroundColor Red -NoNewline; Write-Host " by fashaking"
 
 Refresh-Path
 Ensure-Git
