@@ -18,12 +18,37 @@ Native C/OpenCL RPOW miner with CPU and GPU backends, up to 700x faster than the
 - `--engine native`
 - `--engine gpu`
 
-## Quick start
+## Quick start (Windows, one-liner)
+
+Open PowerShell and paste:
 
 ```powershell
-node rpow-cli.js login --email you@example.com --state .rpow-a.json
-node rpow-cli.js complete-login --link "https://..." --state .rpow-a.json
-node rpow-cli.js mine --count 1000 --engine gpu --state .rpow-a.json
+irm https://raw.githubusercontent.com/fashaking/rpow_cli_miner/main/install.ps1 | iex
+```
+
+That single command will:
+
+1. Install Git, Node.js LTS, and MinGW gcc via `winget` if they aren't already present.
+2. Clone this repo into `%USERPROFILE%\rpow-cli`.
+3. Build the GPU miner (`rpow-gpu-miner.exe`) and CPU fallback.
+4. Prompt you for your account email, send a magic link, and prompt you to paste it back.
+5. Start continuous GPU mining.
+
+Session state is kept in `%USERPROFILE%\.rpow-cli\state.json` so re-running the one-liner picks up where you left off.
+
+To re-run later without prompting:
+
+```powershell
+cd $env:USERPROFILE\rpow-cli
+node rpow-cli.js mine --count forever --engine gpu --state $env:USERPROFILE\.rpow-cli\state.json
+```
+
+## Quick start (manual)
+
+```powershell
+node rpow-cli.js login --email you@example.com
+node rpow-cli.js complete-login --link "https://..."
+node rpow-cli.js mine --count forever --engine gpu
 ```
 
 ## Windows GPU setup

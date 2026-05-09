@@ -18,5 +18,10 @@ or build manually from the MSYS2 MinGW x64 shell:
 
 gcc -O3 -march=native -pthread rpow-native-miner.c -o rpow-native-miner.exe
 
+if (-not (Test-Path .\rpow-native-miner.exe)) {
+  Write-Error "Build appeared to succeed but rpow-native-miner.exe was not produced."
+  exit 1
+}
+
 Write-Host "Built .\rpow-native-miner.exe"
 Write-Host "Run: node rpow-cli.js mine --count 1 --engine native"

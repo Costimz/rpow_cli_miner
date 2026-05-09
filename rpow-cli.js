@@ -16,7 +16,6 @@ const { Worker } = require("worker_threads");
 const DEFAULT_SITE_ORIGIN = "https://rpow2.com";
 const DEFAULT_API_ORIGIN = "https://api.rpow2.com";
 const DEFAULT_INDEX = path.join(__dirname, "index.js");
-const DEFAULT_STATE = path.join(__dirname, ".rpow-cli-state.json");
 const MINER_WORKER = path.join(__dirname, "rpow-miner-worker.js");
 const EXE_SUFFIX = process.platform === "win32" ? ".exe" : "";
 const NATIVE_MINER = path.join(__dirname, `rpow-native-miner${EXE_SUFFIX}`);
@@ -25,8 +24,38 @@ const SAFE_HOSTS = new Set([
   "api.rpow2.com",
   "rpow2.com",
   "www.rpow2.com",
-  "127.0.0.1.sslip.io",
+  ...(process.env.RPOW_DEV === "1" ? ["127.0.0.1.sslip.io", "127.0.0.1", "localhost"] : []),
 ]);
+
+const ENDPOINTS = Object.freeze({
+  authRequest: { method: "POST", path: "/auth/request" },
+  authLogout: { method: "POST", path: "/auth/logout" },
+  me: { method: "GET", path: "/me" },
+  challenge: { method: "POST", path: "/challenge" },
+  mint: { method: "POST", path: "/mint" },
+  send: { method: "POST", path: "/send" },
+  ledger: { method: "GET", path: "/ledger" },
+  activity: { method: "GET", path: "/activity" },
+});
+
+const MAX_NONCE_PREFIX_BYTES = 64;
+const MAX_DIFFICULTY_BITS = 64;
+
+function defaultStatePath() {
+  const home = os.homedir();
+  if (home) {
+    const dir = path.join(home, ".rpow-cli");
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      return path.join(dir, "state.json");
+    } catch {
+      // fall through to legacy path
+    }
+  }
+  return path.join(__dirname, ".rpow-cli-state.json");
+}
+
+const DEFAULT_STATE = defaultStatePath();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const COLORS = {
@@ -190,13 +219,21 @@ function saveState(file, state) {
 }
 
 function discoverFromIndex(indexFile) {
-  const js = fs.readFileSync(indexFile, "utf8");
-  const apiOrigin = /const\s+\w+\s*=\s*"([^"]+)";\s*async function\s+\w+\(\w+,\s*\w+,\s*\w+\)/.exec(js)?.[1]
-    || DEFAULT_API_ORIGIN;
-  const endpoints = [...js.matchAll(/(\w+):\s*(?:(?:\(\)|\w+)\s*=>\s*)?\w+\("([A-Z]+)",\s*"([^"]+)"/g)]
-    .map((m) => ({ name: m[1], method: m[2], path: m[3] }));
-  const workerPath = /new URL\("([^"]*miner\.worker-[^"]+\.js)"/.exec(js)?.[1] || null;
-  return { apiOrigin, endpoints, workerPath };
+  // Best-effort, informational only. Routing always uses the hardcoded
+  // ENDPOINTS table and DEFAULT_API_ORIGIN; we never trust paths scraped
+  // from index.js to avoid letting a tampered bundle redirect API calls.
+  const fallback = {
+    apiOrigin: DEFAULT_API_ORIGIN,
+    endpoints: Object.entries(ENDPOINTS).map(([name, e]) => ({ name, method: e.method, path: e.path })),
+    workerPath: null,
+  };
+  try {
+    const js = fs.readFileSync(indexFile, "utf8");
+    const workerPath = /new URL\("([^"]*miner\.worker-[^"]+\.js)"/.exec(js)?.[1] || null;
+    return { ...fallback, workerPath };
+  } catch {
+    return fallback;
+  }
 }
 
 function printApiMap(discovered) {
@@ -611,8 +648,31 @@ function tryJson(text) {
 }
 
 function hexToBytes(hex) {
-  if (!/^[0-9a-f]*$/i.test(hex) || hex.length % 2 !== 0) throw new Error(`bad nonce_prefix hex: ${hex}`);
+  if (typeof hex !== "string" || !/^[0-9a-f]*$/i.test(hex) || hex.length % 2 !== 0) {
+    throw new Error("bad nonce_prefix hex");
+  }
+  if (hex.length > MAX_NONCE_PREFIX_BYTES * 2) {
+    throw new Error(`nonce_prefix exceeds ${MAX_NONCE_PREFIX_BYTES}-byte cap`);
+  }
   return Buffer.from(hex, "hex");
+}
+
+function validateChallenge(c) {
+  if (!c || typeof c !== "object") throw new Error("invalid challenge: not an object");
+  if (typeof c.challenge_id !== "string" || c.challenge_id.length === 0 || c.challenge_id.length > 256) {
+    throw new Error("invalid challenge: bad challenge_id");
+  }
+  hexToBytes(c.nonce_prefix);
+  const diff = Number(c.difficulty_bits);
+  if (!Number.isInteger(diff) || diff < 1 || diff > MAX_DIFFICULTY_BITS) {
+    throw new Error(`invalid challenge: difficulty_bits out of range [1,${MAX_DIFFICULTY_BITS}]`);
+  }
+  if (c.expires_at !== undefined && c.expires_at !== null) {
+    if (typeof c.expires_at !== "string" || !Number.isFinite(Date.parse(c.expires_at))) {
+      throw new Error("invalid challenge: bad expires_at");
+    }
+  }
+  return c;
 }
 
 function nonceLe64(nonce) {
@@ -1054,7 +1114,7 @@ async function main() {
   const command = args._[0] || "help";
   const discovered = discoverFromIndex(args.index || DEFAULT_INDEX);
   const client = new RpowClient({
-    apiOrigin: args.api || discovered.apiOrigin,
+    apiOrigin: args.api || DEFAULT_API_ORIGIN,
     siteOrigin: args.site || DEFAULT_SITE_ORIGIN,
     stateFile: args.state || DEFAULT_STATE,
     timeoutMs: args.timeout || 20000,
@@ -1149,12 +1209,22 @@ async function main() {
     }
     while (minted < target) {
       let challenge = client.state.challenge;
+      if (challenge) {
+        try { validateChallenge(challenge); }
+        catch (err) {
+          log("warn", "discarding invalid saved challenge", { error: err.message });
+          challenge = null;
+          client.state.challenge = null;
+          client.state.mining = null;
+          client.save();
+        }
+      }
       const challengeExpiresAt = challenge?.expires_at ? Date.parse(challenge.expires_at) : null;
       const challengeExpired = Number.isFinite(challengeExpiresAt) && Date.now() >= challengeExpiresAt - 5000;
       if (!challenge || challengeExpired || client.state.mining?.challenge_id !== challenge.challenge_id || args.fresh) {
         if (challengeExpired) log("warn", "saved challenge expired; requesting a fresh one", { challenge_id: challenge.challenge_id });
         try {
-          challenge = await client.api("POST", "/challenge");
+          challenge = validateChallenge(await client.api("POST", "/challenge"));
         } catch (err) {
           if (err.code === "UNAUTHORIZED") throw err;
           if (!(err.retryable || isTransientNetworkError(err))) throw err;
