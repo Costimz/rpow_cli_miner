@@ -18,8 +18,9 @@ const DEFAULT_API_ORIGIN = "https://api.rpow2.com";
 const DEFAULT_INDEX = path.join(__dirname, "index.js");
 const DEFAULT_STATE = path.join(__dirname, ".rpow-cli-state.json");
 const MINER_WORKER = path.join(__dirname, "rpow-miner-worker.js");
-const NATIVE_MINER = path.join(__dirname, "rpow-native-miner.exe");
-const GPU_MINER = path.join(__dirname, "rpow-gpu-miner.exe");
+const EXE_SUFFIX = process.platform === "win32" ? ".exe" : "";
+const NATIVE_MINER = path.join(__dirname, `rpow-native-miner${EXE_SUFFIX}`);
+const GPU_MINER = path.join(__dirname, `rpow-gpu-miner${EXE_SUFFIX}`);
 const SAFE_HOSTS = new Set([
   "api.rpow2.com",
   "rpow2.com",
