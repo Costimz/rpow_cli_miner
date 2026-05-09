@@ -35,6 +35,15 @@
     - 'p:d,...' : explicit comma-separated platform:device pairs, e.g. '0:0,1:0'
   If omitted you'll be prompted interactively.
 
+.PARAMETER Count
+  Number of tokens to mine before stopping. Use 'forever' (default) to
+  mine indefinitely until Ctrl+C, or any positive integer (e.g. 1000000)
+  to stop after that many tokens. Mutually exclusive with -Duration.
+
+.PARAMETER Duration
+  Mine for a wall-clock duration then stop. Examples: '30m', '6h', '7d'.
+  Mutually exclusive with -Count.
+
 .EXAMPLE
   irm https://raw.githubusercontent.com/fashaking/rpow_cli_miner/main/install.ps1 | iex
 
@@ -53,6 +62,8 @@ param(
   [string]$Branch     = "main",
   [string]$InstallDir = (Join-Path $env:USERPROFILE "rpow-cli"),
   [string]$Gpus       = $env:RPOW_GPUS,
+  [string]$Count      = $env:RPOW_COUNT,
+  [string]$Duration   = $env:RPOW_DURATION,
   [switch]$SkipMine
 )
 
@@ -260,18 +271,63 @@ function Choose-Gpus {
   }
 }
 
-function Start-Mining($stateFile, $gpuSpec) {
+function Choose-MineLength {
+  if ($Duration) { Write-Ok "using -Duration / RPOW_DURATION = '$Duration'"; return @{ Mode = "duration"; Value = $Duration } }
+  if ($Count)    { Write-Ok "using -Count / RPOW_COUNT = '$Count'";          return @{ Mode = "count";    Value = $Count    } }
+
+  Write-Host ""
+  Write-Host "How long should the miner run?"
+  Write-Host "  [a] forever - keep mining until Ctrl+C (recommended)"
+  Write-Host "  [b] count   - stop after N tokens"
+  Write-Host "  [c] time    - stop after a duration like 6h or 7d"
+  $choice = (Read-Host "Choice [a]").Trim().ToLower()
+  if (-not $choice) { $choice = "a" }
+  switch ($choice) {
+    "a"      { return @{ Mode = "count"; Value = "forever" } }
+    "forever"{ return @{ Mode = "count"; Value = "forever" } }
+    "b" {
+      $n = (Read-Host "Number of tokens (positive integer)").Trim()
+      if (-not ($n -match '^\d+$') -or [int64]$n -lt 1) {
+        Write-Warn2 "invalid count, falling back to forever"
+        return @{ Mode = "count"; Value = "forever" }
+      }
+      return @{ Mode = "count"; Value = $n }
+    }
+    "c" {
+      $d = (Read-Host "Duration (e.g. 30m, 6h, 7d)").Trim()
+      if (-not ($d -match '^\d+(ms|s|m|h|d)?$')) {
+        Write-Warn2 "invalid duration, falling back to forever"
+        return @{ Mode = "count"; Value = "forever" }
+      }
+      return @{ Mode = "duration"; Value = $d }
+    }
+    default { return @{ Mode = "count"; Value = "forever" } }
+  }
+}
+
+function Start-Mining($stateFile, $gpuSpec, $length) {
   Write-Step "Starting GPU miner (Ctrl+C to stop)"
   Write-Ok "device selection: $gpuSpec"
+  if ($length.Mode -eq "duration") { Write-Ok "duration: $($length.Value)" }
+  else                              { Write-Ok "count: $($length.Value)" }
+
+  $mineArgs = @(
+    "rpow-cli.js", "mine",
+    "--engine", "gpu",
+    "--gpu-devices", $gpuSpec,
+    "--state", $stateFile,
+    "--gpu-batch", "2097152",
+    "--gpu-local-size", "256"
+  )
+  if ($length.Mode -eq "duration") {
+    $mineArgs += @("--duration", $length.Value)
+  } else {
+    $mineArgs += @("--count", $length.Value)
+  }
+
   Push-Location $InstallDir
   try {
-    & node "rpow-cli.js" mine `
-      --count forever `
-      --engine gpu `
-      --gpu-devices $gpuSpec `
-      --state $stateFile `
-      --gpu-batch 2097152 `
-      --gpu-local-size 256
+    & node @mineArgs
   } finally { Pop-Location }
 }
 
@@ -298,13 +354,15 @@ if (Test-LoggedIn $stateFile) {
 }
 
 $gpuSpec = Choose-Gpus
+$length  = Choose-MineLength
 
 if ($SkipMine) {
   Write-Step "Done. Skipping mine as requested."
   Write-Host ""
+  $lenFlag = if ($length.Mode -eq "duration") { "--duration $($length.Value)" } else { "--count $($length.Value)" }
   Write-Host "To start mining later:" -ForegroundColor Cyan
-  Write-Host "  cd `"$InstallDir`"; node rpow-cli.js mine --count forever --engine gpu --gpu-devices $gpuSpec --state `"$stateFile`""
+  Write-Host "  cd `"$InstallDir`"; node rpow-cli.js mine $lenFlag --engine gpu --gpu-devices $gpuSpec --state `"$stateFile`""
   return
 }
 
-Start-Mining $stateFile $gpuSpec
+Start-Mining $stateFile $gpuSpec $length

@@ -1245,6 +1245,17 @@ function mineSolutionGpu(challenge, state, stateFile, logEveryMs, workerCount, a
   })();
 }
 
+function parseDuration(value) {
+  if (value === undefined || value === null || value === "" || value === false) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const m = /^\s*(\d+)\s*(ms|s|m|h|d)?\s*$/i.exec(String(value));
+  if (!m) throw new Error(`invalid --duration: ${value} (use e.g. 30s, 5m, 2h, 7d)`);
+  const n = Number(m[1]);
+  const unit = (m[2] || "s").toLowerCase();
+  const mult = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000;
+  return n * mult;
+}
+
 async function promptLine(label) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => rl.question(label, (answer) => {
@@ -1349,10 +1360,12 @@ async function main() {
   }
 
   if (command === "mine" || command === "run") {
-    const targetArg = args.count || args.tokens || 1;
+    const targetArg = args.count || args.tokens || (args.duration ? "forever" : 1);
     const target = ["forever", "infinite", "inf", "unlimited"].includes(String(targetArg).toLowerCase())
       ? Infinity
       : Number(targetArg);
+    const durationMs = parseDuration(args.duration);
+    const deadlineAt = durationMs ? Date.now() + durationMs : null;
     const workers = Number(args.workers || defaultWorkerCount());
     const engine = args.engine || (fs.existsSync(NATIVE_MINER) ? "native" : "node");
     const logEveryMs = Number(args["log-every-ms"] || (["native", "gpu"].includes(engine) ? 1000 : 5000));
@@ -1362,7 +1375,8 @@ async function main() {
     if (!Number.isInteger(workers) || workers < 1) throw new Error("--workers must be a positive integer");
     if (!["native", "node", "gpu"].includes(engine)) throw new Error("--engine must be native, gpu or node");
     let minted = 0;
-    const targetLabel = target === Infinity ? "forever" : target;
+    const targetLabel = target === Infinity ? (deadlineAt ? `until ${new Date(deadlineAt).toISOString()}` : "forever") : target;
+    if (deadlineAt) log("info", "mine deadline set", { duration_ms: durationMs, deadline: new Date(deadlineAt).toISOString() });
     while (true) {
       try {
         await client.api("GET", "/me");
@@ -1380,6 +1394,10 @@ async function main() {
       }
     }
     while (minted < target) {
+      if (deadlineAt && Date.now() >= deadlineAt) {
+        log("info", "duration reached; stopping mine loop", { minted, deadline: new Date(deadlineAt).toISOString() });
+        break;
+      }
       let challenge = client.state.challenge;
       if (challenge) {
         try { validateChallenge(challenge); }
@@ -1483,7 +1501,8 @@ async function main() {
   node rpow-cli.js complete-login --link "https://..."
   node rpow-cli.js me
   node rpow-cli.js mine --count 1
-  node rpow-cli.js mine --count forever --engine gpu --gpu-devices auto
+  node rpow-cli.js mine --count 1000000 --engine gpu
+  node rpow-cli.js mine --duration 24h --engine gpu --gpu-devices auto
   node rpow-cli.js mine --count forever --engine gpu --gpu-devices all
   node rpow-cli.js mine --count forever --engine gpu --gpu-devices 0:0,1:0
   node rpow-cli.js mine --count forever --engine native
@@ -1499,6 +1518,8 @@ Options:
   --timeout 20000
   --retries 5
   --log-every-ms 5000
+  --count N|forever (default 1; max safe integer ~9 quadrillion)
+  --duration 30s|5m|2h|7d (stop after this much wall-clock time)
   --workers ${defaultWorkerCount()}
   --engine native|gpu|node
   --gpu-batch 1048576

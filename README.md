@@ -107,7 +107,8 @@ node rpow-cli.js logout
 
 | Flag                | Meaning                                                              |
 | ------------------- | -------------------------------------------------------------------- |
-| `--count N`         | Number of tokens to mint, or `forever`/`infinite`/`unlimited`.       |
+| `--count N`         | Number of tokens to mint, or `forever`/`infinite`/`unlimited`. Defaults to `1`. Accepts any positive integer up to ~9 quadrillion. |
+| `--duration SPEC`   | Stop after this much wall-clock time. Examples: `30s`, `5m`, `2h`, `7d`. Combine with `--count forever` to mine until either limit. |
 | `--engine`          | `node`, `native` (CPU C), or `gpu` (OpenCL).                         |
 | `--workers N`       | CPU threads (for `native`/`node`).                                   |
 | `--gpu-devices`     | `auto`, `all`, or comma list `p:d,p:d` (e.g. `0:0,1:0`).             |
@@ -119,6 +120,24 @@ node rpow-cli.js logout
 | `--retries N`       | Max retries on transient network errors (default 5).                 |
 | `--log-every-ms`    | Mining progress log interval.                                        |
 | `--verbose`         | Log every HTTP request.                                              |
+
+### How long do you want to run?
+
+```powershell
+# Mine forever (until you hit Ctrl+C):
+node rpow-cli.js mine --count forever --engine gpu --gpu-devices auto
+
+# Mine a specific number of tokens:
+node rpow-cli.js mine --count 1000000 --engine gpu --gpu-devices auto
+
+# Mine for one week of wall-clock time:
+node rpow-cli.js mine --duration 7d --engine gpu --gpu-devices auto
+
+# Mine for 6 hours overnight:
+node rpow-cli.js mine --duration 6h --engine gpu --gpu-devices all
+```
+
+The installer asks the same question interactively (forever / count / duration) right before mining starts. To skip the prompt, set `$env:RPOW_COUNT` (e.g. `forever` or `1000000`) **or** `$env:RPOW_DURATION` (e.g. `7d`).
 
 ---
 
