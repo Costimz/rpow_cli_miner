@@ -14,8 +14,9 @@ const DEFAULT_API_ORIGIN = "https://api.rpow2.com";
 const DEFAULT_INDEX = path.join(__dirname, "index.js");
 const DEFAULT_STATE = path.join(__dirname, ".rpow-cli-state.json");
 const MINER_WORKER = path.join(__dirname, "rpow-miner-worker.js");
-const NATIVE_MINER = path.join(__dirname, "rpow-native-miner.exe");
-const GPU_MINER = path.join(__dirname, "rpow-gpu-miner.exe");
+const EXE_SUFFIX = process.platform === "win32" ? ".exe" : "";
+const NATIVE_MINER = path.join(__dirname, `rpow-native-miner${EXE_SUFFIX}`);
+const GPU_MINER = path.join(__dirname, `rpow-gpu-miner${EXE_SUFFIX}`);
 const SAFE_HOSTS = new Set([
   "api.rpow2.com",
   "rpow2.com",
@@ -917,13 +918,21 @@ async function main() {
   }
 
   if (command === "mine" || command === "run") {
-    const target = Number(args.count || args.tokens || 1);
+    const targetArg = args.count || args.tokens || 1;
+    const target = ["forever", "infinite", "inf", "unlimited"].includes(String(targetArg).toLowerCase())
+      ? Infinity
+      : Number(targetArg);
     const workers = Number(args.workers || defaultWorkerCount());
     const engine = args.engine || (fs.existsSync(NATIVE_MINER) ? "native" : "node");
     const logEveryMs = Number(args["log-every-ms"] || (["native", "gpu"].includes(engine) ? 1000 : 5000));
+    if (!(target === Infinity || (Number.isInteger(target) && target > 0))) {
+      throw new Error("--count/--tokens must be a positive integer or forever");
+    }
     if (!Number.isInteger(workers) || workers < 1) throw new Error("--workers must be a positive integer");
     if (!["native", "node", "gpu"].includes(engine)) throw new Error("--engine must be native, gpu or node");
     let minted = 0;
+    const targetLabel = target === Infinity ? "forever" : target;
+    const remainingTokens = () => target === Infinity ? "forever" : Math.max(0, target - minted);
     let consecutiveRecoverableFailures = 0;
     while (true) {
       try {
@@ -959,8 +968,8 @@ async function main() {
           log("warn", `temporary challenge failure; continuing in ${delay}ms`, {
             failures: consecutiveRecoverableFailures,
             minted,
-            target,
-            remaining: Math.max(0, target - minted),
+            target: targetLabel,
+            remaining: remainingTokens(),
             status: err.status,
             code: errorCode(err),
             error: err.message,
@@ -1013,7 +1022,7 @@ async function main() {
         client.state.mining = null;
         client.save();
         log("success", "mint/claim accepted", result);
-        log("success", "mint progress", { minted, target, remaining: Math.max(0, target - minted) });
+        log("success", "mint progress", { minted, target: targetLabel, remaining: remainingTokens() });
         if (minted < target) {
           const delay = postMintDelayMs();
           log("info", "post-mint cooldown", { delay_ms: delay });
@@ -1030,8 +1039,8 @@ async function main() {
           log("warn", `temporary mint failure; dropping challenge and continuing in ${delay}ms`, {
             failures: consecutiveRecoverableFailures,
             minted,
-            target,
-            remaining: Math.max(0, target - minted),
+            target: targetLabel,
+            remaining: remainingTokens(),
             error: err.message,
             code: errorCode(err),
             status: err.status,
@@ -1048,7 +1057,7 @@ async function main() {
         client.save();
       }
     }
-    log("success", "pipeline complete", { minted, target, remaining: Math.max(0, target - minted) });
+    log("success", "pipeline complete", { minted, target: targetLabel, remaining: remainingTokens() });
     return;
   }
 
@@ -1058,6 +1067,7 @@ async function main() {
   node rpow-cli.js complete-login --link "https://..."
   node rpow-cli.js me
   node rpow-cli.js mine --count 1
+  node rpow-cli.js mine --count forever --engine native
   node rpow-cli.js run --count 3
   node rpow-cli.js send --to user@example.com --amount 1
   node rpow-cli.js ledger
